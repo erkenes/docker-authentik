@@ -1,0 +1,177 @@
+version: "3.9"
+
+###############################################################
+# Services
+###############################################################
+services:
+  authentik_server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik_server
+    restart: unless-stopped
+    command: server
+    networks:
+      - default
+      - traefik-proxy
+    depends_on:
+      - postgresql
+      - redis
+    volumes:
+      - "./apps/authentik/media:/media"
+      - "./apps/authentik/custom-templates:/templates"
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: 'postgresql'
+      AUTHENTIK_POSTGRESQL__NAME: 'authentik'
+      AUTHENTIK_POSTGRESQL__USER: 'authentik'
+      AUTHENTIK_POSTGRESQL__PASSWORD: 'file:///run/secrets/postgresql_password'
+      AUTHENTIK_REDIS__HOST: 'redis'
+      AUTHENTIK_SECRET_KEY: 'file:///run/secrets/authentik_secret_key'
+      AUTHENTIK_COOKIE_DOMAIN: '${AUTHENTIK_COOKIE_DOMAIN}'
+      AUTHENTIK_ERROR_REPORTING__ENABLED: '${AUTHENTIK_ERROR_REPORTING__ENABLED}'
+      AUTHENTIK_EMAIL__HOST: '${AUTHENTIK_EMAIL__HOST}'
+      AUTHENTIK_EMAIL__PORT: '${AUTHENTIK_EMAIL__PORT}'
+      AUTHENTIK_EMAIL__USERNAME: 'file:///run/secrets/smtp_user'
+      AUTHENTIK_EMAIL__PASSWORD: 'file:///run/secrets/smtp_password'
+      AUTHENTIK_EMAIL__USE_TLS: '${AUTHENTIK_EMAIL__USE_TLS}'
+      AUTHENTIK_EMAIL__USE_SSL: '${AUTHENTIK_EMAIL__USE_SSL}'
+      AUTHENTIK_EMAIL__TIMEOUT: '${AUTHENTIK_EMAIL__TIMEOUT}'
+      AUTHENTIK_EMAIL__FROM: '${AUTHENTIK_EMAIL__FROM}'
+      AUTHENTIK_LOG_LEVEL: '${AUTHENTIK_LOG_LEVEL}'
+      AUTHENTIK_GDPR_COMPLIANCE: 'true'
+    secrets:
+      - postgresql_password
+      - authentik_secret_key
+      - smtp_user
+      - smtp_password
+    ports:
+      - '9000:9000'
+    labels:
+      - "traefik.enable=true"
+      ## HTTP Routers
+      - "traefik.http.routers.authentik-rtr.rule=Host(`authentik.$DOMAIN`)"
+      - "traefik.http.routers.authentik-rtr.entrypoints=https"
+      - "traefik.http.routers.authentik-rtr.tls=true"
+      ## Individual Application forwardAuth regex (catch any subdomain using individual application forwardAuth)
+      - "traefik.http.routers.authentik-rtr-outpost.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.$DOMAIN`) && PathPrefix(`/outpost.goauthentik.io/`)"
+      - "traefik.http.routers.authentik-rtr-outpost.entrypoints=https"
+      - "traefik.http.routers.authentik-rtr-outpost.tls=true"
+      ## HTTP Services
+      - "traefik.http.routers.authentik-rtr.service=authentik-svc"
+      - "traefik.http.services.authentik-svc.loadBalancer.server.port=9000"
+
+  authentik_worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik_worker
+    restart: unless-stopped
+    command: worker
+    networks:
+      - default
+      - traefik-proxy
+    depends_on:
+      - postgresql
+      - redis
+    volumes:
+      - "./apps/authentik/media:/media"
+      - "./apps/authentik/custom-templates:/templates"
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: 'postgresql'
+      AUTHENTIK_POSTGRESQL__NAME: 'authentik'
+      AUTHENTIK_POSTGRESQL__USER: 'authentik'
+      AUTHENTIK_POSTGRESQL__PASSWORD: 'file:///run/secrets/postgresql_password'
+      AUTHENTIK_REDIS__HOST: 'redis'
+      AUTHENTIK_SECRET_KEY: 'file:///run/secrets/authentik_secret_key'
+      AUTHENTIK_COOKIE_DOMAIN: '${AUTHENTIK_COOKIE_DOMAIN}'
+      AUTHENTIK_ERROR_REPORTING__ENABLED: '${AUTHENTIK_ERROR_REPORTING__ENABLED}'
+      AUTHENTIK_EMAIL__HOST: '${AUTHENTIK_EMAIL__HOST}'
+      AUTHENTIK_EMAIL__PORT: '${AUTHENTIK_EMAIL__PORT}'
+      AUTHENTIK_EMAIL__USERNAME: 'file:///run/secrets/smtp_user'
+      AUTHENTIK_EMAIL__PASSWORD: 'file:///run/secrets/smtp_password'
+      AUTHENTIK_EMAIL__USE_TLS: '${AUTHENTIK_EMAIL__USE_TLS}'
+      AUTHENTIK_EMAIL__USE_SSL: '${AUTHENTIK_EMAIL__USE_SSL}'
+      AUTHENTIK_EMAIL__TIMEOUT: '${AUTHENTIK_EMAIL__TIMEOUT}'
+      AUTHENTIK_EMAIL__FROM: '${AUTHENTIK_EMAIL__FROM}'
+      AUTHENTIK_LOG_LEVEL: '${AUTHENTIK_LOG_LEVEL}'
+      AUTHENTIK_GDPR_COMPLIANCE: 'true'
+    secrets:
+      - postgresql_password
+      - authentik_secret_key
+      - smtp_user
+      - smtp_password
+
+  postgresql:
+    image: postgres:12-alpine
+    container_name: authentik_postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    networks:
+      - default
+    volumes:
+      - "./apps/postgresql/data:/var/lib/postgresql/data"
+    environment:
+      POSTGRES_DB: 'authentik'
+      POSTGRES_USER: 'authentik'
+      POSTGRES_PASSWORD_FILE: '/run/secrets/postgresql_password'
+    secrets:
+      - postgresql_password
+
+  redis:
+    image: redis:alpine
+    container_name: authentik_redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    networks:
+      - default
+
+#  whoami-test:
+#    image: traefik/whoami
+#    container_name: whoami-test
+#    restart: unless-stopped
+#    security_opt:
+#      - no-new-privileges:true
+#    networks:
+#      - traefik-proxy
+#    environment:
+#      - TZ
+#    labels:
+#      - "traefik.enable=true"
+#      ## HTTP Routers
+#      - "traefik.http.routers.whoami-test-rtr.rule=Host(`whoami-test.$DOMAIN`)"
+#      - "traefik.http.routers.whoami-test-rtr.entrypoints=https"
+#      - "traefik.http.routers.whoami-test-rtr.tls=true"
+#      ## Middlewares
+#      - "traefik.http.routers.whoami-test-rtr.middlewares=middlewares-authentik@file"
+
+###############################################################
+# Docker Secrets
+###############################################################
+secrets:
+  # Authentik Postgres
+  postgresql_password:
+    file: ./secrets/postgresql_password
+  # Authentik
+  authentik_secret_key:
+    file: ./secrets/authentik_secret_key
+  # Mail Auth Account
+  smtp_user:
+    file: ./secrets/smtp_user
+  smtp_password:
+    file: ./secrets/smtp_password
+
+
+###############################################################
+# Networks
+###############################################################
+networks:
+  default:
+    name: authentik-traefik
+  traefik-proxy:
+    external: true
